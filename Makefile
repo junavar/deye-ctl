@@ -3,16 +3,26 @@ RPI_USER = pi
 RPI_IP   = 192.168.1.153
 RPI_DEST = /home/pi/
 
+# Variables de GitHub
+GITHUB_REPO = https://github.com/junavar/deye-ctl.git # ¡IMPORTANTE! Cambia 'tu-usuario' por tu usuario de GitHub
+GITHUB_BRANCH = main
+
 BINARY_NAME = deye-ctl-arm6
 GO_VARS = GOOS=linux GOARCH=arm GOARM=6 GO111MODULE=on
 
-.PHONY: all build deploy clean
+.PHONY: all build deploy clean push_github
 
 all: build
 
 build:
 	@echo "Compilando $(BINARY_NAME) para ARMv6..."
 	$(GO_VARS) go build -o $(BINARY_NAME) .
+
+push_github:
+	@read -p "Introduce el mensaje de commit: " commit_message; \
+	git add .; \
+	git commit -m "$$commit_message"; \
+	git push origin $(GITHUB_BRANCH)
 
 deploy: build
 	@echo "Copiando binario a la Raspberry Pi..."
