@@ -10,19 +10,24 @@ GITHUB_BRANCH = main
 BINARY_NAME = deye-ctl-arm6
 GO_VARS = GOOS=linux GOARCH=arm GOARM=6 GO111MODULE=on
 
+# Extraer la versión desde la constante en main.go
+VERSION = $(shell grep 'Version' main.go | head -n 1 | cut -d '"' -f 2)
+
 .PHONY: all build deploy clean push_github
 
 all: build
 
 build:
-	@echo "Compilando $(BINARY_NAME) para ARMv6..."
+	@echo "Compilando $(BINARY_NAME) v$(VERSION) para ARMv6..."
 	$(GO_VARS) go build -o $(BINARY_NAME) .
 
 push_github:
 	@read -p "Introduce el mensaje de commit: " commit_message; \
 	git add .; \
 	git commit -m "$$commit_message"; \
-	git push origin $(GITHUB_BRANCH)
+	git tag -a v$(VERSION) -m "Release v$(VERSION)"; \
+	git push origin $(GITHUB_BRANCH); \
+	git push origin v$(VERSION)
 
 deploy: build
 	@echo "Copiando binario a la Raspberry Pi..."
