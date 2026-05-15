@@ -4,7 +4,7 @@ RPI_IP   = 192.168.1.153
 RPI_DEST = /home/pi/
 
 # Variables de GitHub
-GITHUB_REPO = https://github.com/junavar/deye-ctl.git # ¡IMPORTANTE! Cambia 'tu-usuario' por tu usuario de GitHub
+GITHUB_REPO = https://github.com/junavar/deye-ctl.git
 GITHUB_BRANCH = main
 
 BINARY_NAME = deye-ctl-arm6
@@ -13,13 +13,19 @@ GO_VARS = GOOS=linux GOARCH=arm GOARM=6 GO111MODULE=on
 # Extraer la versión desde la constante en main.go
 VERSION = $(shell grep 'Version' main.go | head -n 1 | cut -d '"' -f 2)
 
-.PHONY: all build deploy clean push_github
+.PHONY: all build deploy clean push_github init_repo
 
 all: build
 
 build:
 	@echo "Compilando $(BINARY_NAME) v$(VERSION) para ARMv6..."
 	$(GO_VARS) go build -o $(BINARY_NAME) .
+
+init_repo:
+	git init
+	git remote add origin $(GITHUB_REPO)
+	git branch -M $(GITHUB_BRANCH)
+	@echo "Repositorio inicializado y vinculado a $(GITHUB_REPO)"
 
 push_github:
 	@read -p "Introduce el mensaje de commit: " commit_message; \

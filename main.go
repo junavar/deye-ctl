@@ -15,31 +15,34 @@ import (
 )
 
 const (
-	Version     = "0.0.10"
+	Version     = "0.0.11"
 	SHM_KEY     = 0x1238
 	SHM_SIZE    = 512
 	IPC_CREAT   = 01000
 	DEFAULT_DEV = "/dev/serial/by-path/platform-20980000.usb-usb-0:1.4:1.0-port0"
 )
 
-// Estructura de datos para SHM (v0.0.9)
+// Estructura de datos para SHM (v0.0.11
 type ShmPayload struct {
 	Timestamp   int64
-	GenInv      float64
-	Grid        float64
-	BattPower   float64
-	SOC         float64
-	GridCTInt   float64 // Registro 169 (Antes LoadUPS)
-	LoadTotal   float64
-	TempDisipDC float64
-	TempBatt    float64
-	PV1Power    float64 // Registro 186
-	PV2Power    float64 // Registro 187
-	PV3Power    float64 // Registro 188
-	PV4Power    float64 // Registro 189
-	TempDisipAC float64
-	InvOutPower float64 // Registro 175 (NUEVA)
-	Padding     [388]byte // Ajustado para mantener 512 bytes totales (412 - 3*8)
+	PV1Power      float32 // Registro 186
+	PV2Power      float32 // Registro 187
+	PV3Power      float32 // Registro 188
+	PV4Power      float32 // Registro 189
+	PVTotalPower  float32 // Calculada: suma PV1..PV4
+	BattPower     float32 // Registro 190
+	InverterPower float32 // Registro 175
+	GenInv        float32 // Registro 166
+	GridCTInt     float32 // Registro 169
+	GridCTExt     float32 // Registro 172
+	LoadTotal     float32 // Calculada: P175+P166+P172
+	LoadUPS       float32 // Calculada: P175+P166+P169
+	LoadNUPS      float32 // Calculada: P172-P169
+	TempDisipDC   float32 // Registro 90
+	TempDisipAC   float32 // Registro 91
+	TempBatt      float32 // Registro 182
+	SOC           float32 // Registro 184
+	Padding       [432]byte // Ajustado para 512 bytes totales (512 - 8 - 17*4 - 4)
 	CRC         uint32
 }
 
@@ -77,19 +80,24 @@ func main() {
 		}
 
 		// Lectura de registros Modbus
-		data.GenInv      = readU16(client, 166, 1.0)
-		data.Grid        = readS16(client, 172, 1.0)
-		data.BattPower   = readS16(client, 190, 1.0)
-		data.SOC         = readU16(client, 184, 1.0)
-		data.GridCTInt   = readS16(client, 169, 1.0) // Registro 169
-		data.InvOutPower = readS16(client, 175, 1.0) // Registro 175
-		data.LoadTotal   = readU16(client, 178, 1.0)
 		data.PV1Power    = readU16(client, 186, 1.0)
 		data.PV2Power    = readU16(client, 187, 1.0)
 		data.PV3Power    = readU16(client, 188, 1.0)
 		data.PV4Power    = readU16(client, 189, 1.0)
+		data.BattPower   = readS16(client, 190, 1.0)
+		data.InverterPower = readS16(client, 175, 1.0)
+		data.GenInv      = readU16(client, 166, 1.0)
+		data.GridCTInt   = readS16(client, 169, 1.0)
+		data.GridCTExt   = readS16(client, 172, 1.0)
+		data.SOC         = readU16(client, 184, 1.0)
 
-		// Temperaturas
+		// Cálculos de potencia
+		data.PVTotalPower = data.PV1Power + data.PV2Power + data.PV3Power + data.PV4Power
+		data.LoadTotal    = data.InverterPower + data.GenInv + data.GridCTExt
+		data.LoadUPS      = data.InverterPower + data.GenInv + data.GridCTInt
+		data.LoadNUPS     = data.GridCTExt - data.GridCTInt
+
+		// Temperaturas (Escala 0.1 y offset en disipadores)
 		data.TempDisipDC = readU16(client, 90, 0.1) - 100.0
 		data.TempDisipAC = readU16(client, 91, 0.1) - 100.0
 		data.TempBatt    = readU16(client, 182, 0.1)
@@ -98,17 +106,16 @@ func main() {
 		data.CRC = calculateCRC(&data)
 		writeToSHM(shmAddr, &data)
 
-		totalSolar := data.PV1Power + data.PV2Power + data.PV3Power + data.PV4Power
-
 		// Refresco de pantalla (Terminal)
 		fmt.Printf("\033[H\033[2J")
 		fmt.Printf("DEYE CONTROL v%s | %s\n", Version, time.Now().Format("15:04:05"))
 		fmt.Println("--------------------------------------------------")
 		fmt.Printf(" BATERÍA:    %3.0f%%  |  POTENCIA BATT: %6.1f W\n", data.SOC, data.BattPower)
-		fmt.Printf(" SOLAR TOTAL:%6.1f W |  GEN-INV:      %6.1f W\n", totalSolar, data.GenInv)
+		fmt.Printf(" SOLAR TOTAL:%6.1f W |  GEN-INV:      %6.1f W\n", data.PVTotalPower, data.GenInv)
 		fmt.Printf(" (PV1:%.0f PV2:%.0f PV3:%.0f PV4:%.0f)\n", data.PV1Power, data.PV2Power, data.PV3Power, data.PV4Power)
-		fmt.Printf(" RED/GRID:  %6.1f W |  GRID CT INT:  %6.1f W\n", data.Grid, data.GridCTInt)
-		fmt.Printf(" INV OUT:   %6.1f W |  LOAD TOTAL:   %6.1f W\n", data.InvOutPower, data.LoadTotal)
+		fmt.Printf(" GRID CT EXT:%6.1f W |  GRID CT INT:  %6.1f W\n", data.GridCTExt, data.GridCTInt)
+		fmt.Printf(" INV POWER: %6.1f W |  LOAD TOTAL:   %6.1f W\n", data.InverterPower, data.LoadTotal)
+		fmt.Printf(" LOAD UPS:  %6.1f W |  LOAD NUPS:    %6.1f W\n", data.LoadUPS, data.LoadNUPS)
 		fmt.Printf(" DISIP DC:  %4.1f °C |  DISIP AC:     %4.1f °C\n", data.TempDisipDC, data.TempDisipAC)
 		fmt.Printf(" TEMP BATT: %4.1f °C |\n", data.TempBatt)
 		fmt.Println("--------------------------------------------------")
@@ -117,16 +124,16 @@ func main() {
 
 // --- Modbus Helpers ---
 
-func readU16(c modbus.Client, addr uint16, scale float64) float64 {
+func readU16(c modbus.Client, addr uint16, scale float32) float32 {
 	res, err := c.ReadHoldingRegisters(addr, 1)
 	if err != nil { return 0 }
-	return float64(binary.BigEndian.Uint16(res)) * scale
+	return float32(binary.BigEndian.Uint16(res)) * scale
 }
 
-func readS16(c modbus.Client, addr uint16, scale float64) float64 {
+func readS16(c modbus.Client, addr uint16, scale float32) float32 {
 	res, err := c.ReadHoldingRegisters(addr, 1)
 	if err != nil { return 0 }
-	return float64(int16(binary.BigEndian.Uint16(res))) * scale
+	return float32(int16(binary.BigEndian.Uint16(res))) * scale
 }
 
 // --- SHM Functions ---
